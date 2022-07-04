@@ -30,7 +30,7 @@ colorlog==5.0.1
 commonmark==0.9.1
 connexion==2.7.0
 croniter==0.3.37
-cryptography==3.4.7
+cryptography==36.0.1
 defusedxml==0.7.1
 dill==0.3.2
 dnspython==1.16.0
@@ -116,3 +116,7 @@ watchtower==0.7.3
 Werkzeug==1.0.1
 WTForms==2.3.3
 zipp==3.4.1
+fsspec
+s3fs
+pyarrow==8.0.0
+fastparquet==0.6.0

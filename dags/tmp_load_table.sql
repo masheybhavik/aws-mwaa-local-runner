@@ -1,0 +1,3 @@
+COPY INTO "EL_MATILLION_RAW"."RAW_CSV"."dim_current_loss_run" 
+FROM @"EL_MATILLION_RAW"."DW_UTIL".S3_INTEGRATION/dim_current_loss_run.csv 
+ON_ERROR='ABORT_STATEMENT' ;
