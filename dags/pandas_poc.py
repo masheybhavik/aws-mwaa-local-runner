@@ -21,9 +21,6 @@ from sqlalchemy import create_engine
 def _pandas():
     s3_hook = S3Hook()
     logging.info("Running the functions for Pandas")
-    # s3 = boto3.client('s3', 
-    #                     aws_access_key_id="AKIAYEOD2SZDLNVGU2UQ",
-    #                     aws_secret_access_key="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")
     s3 = S3Hook(aws_conn_id='aws_conn_id').get_conn()
     logging.info("S3 conn is available %s", s3)
     obj = s3.get_object(Bucket='datahub-custom-analytics-tables', Key='dim_current_loss_run.csv')
@@ -32,16 +29,7 @@ def _pandas():
     # df = pd.read_csv(filepath, sep=',', skiprows=1, header=None)
     # logging.info("DF is available %s", df)
 
-    # Fill in your SFlake details here 
-    # engine = create_engine(URL(
-    #     account = 'qqfoshb-embroker',
-    #     user = 'bshaw',
-    #     password = 'H.AGhycRFtbKG._RCU4e',
-    #     database = 'EL_MATILLION_RAW',
-    #     schema = 'RAW_CSV',
-    #     warehouse = 'DEV_EDW_XS_WH',
-    #     role='EDW_DB_OWNER_ROLE',
-    # ))
+
     engine = SnowflakeHook(snowflake_conn_id='snowflake_conn_id').get_sqlalchemy_engine()
 
     connection = engine.connect()

@@ -26,7 +26,11 @@ def _load_csv(csv_file, table_name):
     s3 = S3Hook(aws_conn_id='aws_conn_id').get_conn()
     obj = s3.get_object(Bucket='datahub-custom-analytics-tables', Key=csv_file)
     df = pd.read_csv(io.BytesIO(obj['Body'].read()))
-    
+    df = df.apply(lambda col: pd.to_datetime(col, errors='ignore') 
+              if col.dtypes == object 
+              else col, 
+              axis=0)
+              
     engine = SnowflakeHook(snowflake_conn_id='snowflake_conn_id').get_sqlalchemy_engine()
     connection = engine.connect()
     
