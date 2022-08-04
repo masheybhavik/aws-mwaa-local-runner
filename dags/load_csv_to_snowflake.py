@@ -18,7 +18,7 @@ from airflow.utils.task_group import TaskGroup
 from airflow.hooks.base_hook import BaseHook
 from airflow.providers.slack.operators.slack_webhook import SlackWebhookOperator
 
-account_id = boto3.client('sts').get_caller_identity().get('Account')
+account_id = "559293306438" # boto3.client('sts').get_caller_identity().get('Account')
 if account_id=="821579699083":  
     path="prd-datahub-custom-analytics-tables"
 elif account_id=="559293306438":
@@ -34,6 +34,7 @@ snowflake__warehouse =  Variable.get("snowflake__warehouse")
 
 DAG_ID = os.path.basename(__file__).replace(".py", "")
 os.environ['AWS_DEFAULT_REGION'] = 'us-west-1' # use variable 
+
 def task_fail_slack_alert(context):
     SLACK_CONN_ID = 'slack'
     slack_webhook_token = BaseHook.get_connection(SLACK_CONN_ID).password
@@ -71,22 +72,25 @@ def _process_obtained_data(ti):
 
 def _load_csv(csv_file, snowflake__database, snowflake__schema, table_name):
     logging.info("CSV File name: %s", csv_file)
-    s3 = S3Hook(aws_conn_id='aws_default').get_conn()
-    obj = s3.get_object(Bucket=path, Key=csv_file)
-    df = pd.read_csv(io.BytesIO(obj['Body'].read()))
-
-    df = df.apply(lambda col: pd.to_datetime(col, errors='ignore') 
-              if col.dtypes == object 
-              else col, 
-              axis=0)
-
+    s3 = S3Hook(aws_conn_id='aws_default').get_conn() 
     engine = SnowflakeHook(snowflake_conn_id='snowflake_conn_id').get_sqlalchemy_engine()
-    connection = engine.connect()
-    
-    #make sure index is False, Snowflake doesnt accept indexes
-    df.to_sql(f"stg_{table_name}", schema=snowflake__schema, con=engine, index=False) 
-    
-    connection.close()
+
+    obj = s3.get_object(Bucket=path, Key=csv_file)
+    head_obj = s3.head_object(Bucket=path, Key=csv_file)
+
+    if head_obj['ContentLength'] < 10000000:
+        df = pd.read_csv(io.BytesIO(obj['Body'].read()) )
+        df = df.apply(lambda col: pd.to_datetime(col, errors='ignore') 
+                        if col.dtypes == object 
+                        else col, 
+                        axis=0)
+        df.to_sql(f"stg_{table_name}", schema=snowflake__schema, con=engine, if_exists="replace", index=False) 
+    else:
+        df = pd.read_csv(io.BytesIO(obj['Body'].read()), na_values=[''], keep_default_na=False)
+
+        df.head(0).to_sql(name=f"stg_{table_name}", schema=snowflake__schema, con=engine, if_exists="replace",  index=False)
+        engine.execute(f"copy into {snowflake__schema}.stg_{table_name} from @DW_UTIL.S3_INTEGRATION/{csv_file} FILE_FORMAT = (FORMAT_NAME = 'DW_UTIL.MY_S3_CSV')") 
+
     engine.dispose()
 
 
@@ -94,7 +98,7 @@ def _load_csv(csv_file, snowflake__database, snowflake__schema, table_name):
 default_args = {
     "owner": "Aditya Kommu & Yotam Shacham",
     "depends_on_past": False,
-    "start_date": datetime(2022, 7, 12),
+    "start_date": datetime(2022, 8, 2),
     "email": ["bhavik@mashey.com"],
     "email_on_failure": False,
     "email_on_retry": False,
@@ -107,7 +111,7 @@ default_args = {
 }
 
 with DAG('load_csv_to_snowflake', schedule_interval='@daily',default_args=default_args,
-            concurrency=8, max_active_runs=1, 
+            concurrency=4, max_active_runs=1, 
             description='Load data from CSV files to snowflake dynamically.') as dag:
 
     list_csvs = S3ListOperator(
@@ -141,32 +145,29 @@ with DAG('load_csv_to_snowflake', schedule_interval='@daily',default_args=defaul
             for index, csv_file in enumerate(iterable_list):
                 table_name = csv_file.replace(".csv", "")
 
-                drop_table = SnowflakeOperator(
-                    task_id=f'drop_table_{table_name}',
-                    sql=f'drop table if exists "{snowflake__database}"."{snowflake__schema}".stg_{table_name}',
-                    snowflake_conn_id="snowflake_conn_id",
-                    on_failure_callback=task_fail_slack_alert
-                )
+                
                 load_csv = PythonOperator(
                     task_id=f'load_csv_{table_name}',
                     python_callable=_load_csv,
                     op_kwargs={'csv_file': csv_file, 'snowflake__database':snowflake__database, 'snowflake__schema': snowflake__schema, 'table_name': table_name},
+                    retries=0,
                     on_failure_callback=task_fail_slack_alert
                 )
                 process_csv = SnowflakeOperator(
                     task_id=f'process_csv_{table_name}',
                     sql=f'create or replace table "{snowflake__database}"."{snowflake__schema}".{table_name} clone "{snowflake__database}"."{snowflake__schema}".stg_{table_name}',
                     snowflake_conn_id="snowflake_conn_id",
+                    retries=0,
                     on_failure_callback=task_fail_slack_alert
                 )
-                drop_table_after_processing = SnowflakeOperator(
-                    task_id=f'drop_table_after_processing_{table_name}',
+                drop_table = SnowflakeOperator(
+                    task_id=f'drop_table_{table_name}',
                     sql=f'drop table if exists "{snowflake__database}"."{snowflake__schema}".stg_{table_name}',
                     snowflake_conn_id="snowflake_conn_id",
                     on_failure_callback=task_fail_slack_alert
                 )
 
-                drop_table >> load_csv >> process_csv >> drop_table_after_processing
+                load_csv >> process_csv >> drop_table
 
 # DAG level dependencies
 list_csvs >> preparation_task >> dynamic_tasks_group >> all_done
